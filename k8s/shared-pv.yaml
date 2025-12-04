@@ -4,11 +4,11 @@ metadata:
   name: shared-pv
 spec:
   capacity:
-    storage: 5Gi  # You can adjust the size depending on your needs
+    storage: 1Gi
   volumeMode: Filesystem
   accessModes:
     - ReadWriteOnce
-  storageClassName: shared-storage  # Reference the StorageClass
+  storageClassName: shared-storage
   hostPath:
-    path: /data/shared  # Path on the host machine
+    path: /data/shared
     type: DirectoryOrCreate
