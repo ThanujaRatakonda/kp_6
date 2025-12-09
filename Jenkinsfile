@@ -4,7 +4,7 @@ pipeline {
     environment {
         IMAGE_TAG = "${env.BUILD_NUMBER}"
         HARBOR_URL = "10.131.103.92:8090"
-        HARBOR_PROJECT = "kp_4"
+        HARBOR_PROJECT = "kp_3"
         TRIVY_OUTPUT_JSON = "trivy-output.json"
     }
 
@@ -12,16 +12,17 @@ pipeline {
         choice(
             name: 'ACTION',
             choices: ['FULL_PIPELINE', 'SCALE_ONLY'],
-            description: 'Choose FULL_PIPELINE or SCALE_ONLY'
+            description: 'Run full pipeline or only scaling'
         )
+
         choice(
-            name: 'MICROSERVICE_TO_RUN',
+            name: 'SERVICE',
             choices: ['ALL', 'FRONTEND', 'BACKEND'],
-            description: 'Which microservice to build/deploy'
+            description: 'Which microservice to deploy'
         )
-        string(name: 'FRONTEND_REPLICAS', defaultValue: '1', description: 'Frontend replica count')
-        string(name: 'BACKEND_REPLICAS', defaultValue: '1', description: 'Backend replica count')
-        string(name: 'DB_REPLICAS', defaultValue: '1', description: 'Database replica count')
+
+        string(name: 'REPLICA_COUNT', defaultValue: '1', description: 'Frontend & Backend replicas')
+        string(name: 'DB_REPLICA_COUNT', defaultValue: '1', description: 'DB replicas')
     }
 
     stages {
@@ -29,119 +30,135 @@ pipeline {
         stage('Checkout') {
             when { expression { params.ACTION == 'FULL_PIPELINE' } }
             steps {
-                git 'https://github.com/ThanujaRatakonda/kp_4.git'
+                git 'https://github.com/ThanujaRatakonda/kp_3.git'
             }
         }
 
-        stage('Apply Storage') {
+        stage('Build Docker Images') {
+            when { expression { params.ACTION == 'FULL_PIPELINE' } }
             steps {
-                sh """
-                    kubectl apply -f k8s/shared-storage-class.yaml
-                    kubectl apply -f k8s/shared-pv.yaml
-                    kubectl apply -f k8s/shared-pvc.yaml
-                """
-            }
-        }
+                script {
+                    def services = [
+                        FRONTEND: [name: "frontend", folder: "frontend"],
+                        BACKEND : [name: "backend",  folder: "backend"]
+                    ]
 
-        stage('Database Pipeline') {
-            steps {
-                sh "kubectl apply -f k8s/database-deployment.yaml"
-                sh "kubectl scale statefulset database --replicas=${params.DB_REPLICAS}"
-            }
-        }
-
-        stage('Frontend Pipeline') {
-            when { expression { params.MICROSERVICE_TO_RUN == 'ALL' || params.MICROSERVICE_TO_RUN == 'FRONTEND' } }
-            stages {
-                stage('Build Frontend') {
-                    when { expression { params.ACTION == 'FULL_PIPELINE' } }
-                    steps { sh "docker build -t frontend:${IMAGE_TAG} ./frontend" }
-                }
-                stage('Scan Frontend') {
-                    when { expression { params.ACTION == 'FULL_PIPELINE' } }
-                    steps {
-                        sh """
-                            trivy image frontend:${IMAGE_TAG} \
-                                --severity CRITICAL,HIGH \
-                                --format json -o ${TRIVY_OUTPUT_JSON}
-                        """
-                        archiveArtifacts artifacts: "${TRIVY_OUTPUT_JSON}"
+                    services.each { key, svc ->
+                        if (params.SERVICE == key || params.SERVICE == 'ALL') {
+                            echo "Building image for ${svc.name}"
+                            sh "docker build -t ${svc.name}:${IMAGE_TAG} ${svc.folder}"
+                        }
                     }
                 }
-                stage('Push Frontend') {
-                    when { expression { params.ACTION == 'FULL_PIPELINE' } }
-                    steps {
-                        script {
-                            def fullImg = "${HARBOR_URL}/${HARBOR_PROJECT}/frontend:${IMAGE_TAG}"
-                            withCredentials([usernamePassword(credentialsId: 'harbor-creds', usernameVariable: 'U', passwordVariable: 'P')]) {
-                                sh "echo \$P | docker login ${HARBOR_URL} -u \$U --password-stdin"
-                                sh "docker tag frontend:${IMAGE_TAG} ${fullImg}"
-                                sh "docker push ${fullImg}"
+            }
+        }
+
+        stage('Scan Docker Images') {
+            when { expression { params.ACTION == 'FULL_PIPELINE' } }
+            steps {
+                script {
+                    def services = [
+                        FRONTEND: "frontend",
+                        BACKEND : "backend"
+                    ]
+
+                    services.each { key, img ->
+                        if (params.SERVICE == key || params.SERVICE == 'ALL') {
+                            echo "Scanning ${img}:${IMAGE_TAG}"
+                            sh """
+                                trivy image ${img}:${IMAGE_TAG} \
+                                --severity CRITICAL,HIGH \
+                                --format json \
+                                -o ${TRIVY_OUTPUT_JSON}
+                            """
+
+                            archiveArtifacts artifacts: "${TRIVY_OUTPUT_JSON}", fingerprint: true
+
+                            def vul = sh(
+                                script: """jq '[.Results[] |
+                                    (.Packages // [] | .[]? | select(.Severity=="CRITICAL" or .Severity=="HIGH")) +
+                                    (.Vulnerabilities // [] | .[]? | select(.Severity=="CRITICAL" or .Severity=="HIGH"))
+                                ] | length' ${TRIVY_OUTPUT_JSON}""",
+                                returnStdout: true
+                            ).trim()
+
+                            if (vul.toInteger() > 0) {
+                                error "Critical/High vulnerabilities found in ${img}"
                             }
                         }
                     }
                 }
-                stage('Deploy Frontend') {
-                    when { expression { params.ACTION == 'FULL_PIPELINE' } }
-                    steps {
-                        sh """
-                            sed -i 's/__IMAGE_TAG__/${IMAGE_TAG}/g' k8s/frontend-deployment.yaml
-                            kubectl apply -f k8s/frontend-deployment.yaml
-                        """
-                    }
-                }
-                stage('Scale Frontend') {
-                    steps { sh "kubectl scale deployment frontend --replicas=${params.FRONTEND_REPLICAS}" }
-                }
             }
         }
 
-        stage('Backend Pipeline') {
-            when { expression { params.MICROSERVICE_TO_RUN == 'ALL' || params.MICROSERVICE_TO_RUN == 'BACKEND' } }
-            stages {
-                stage('Build Backend') {
-                    when { expression { params.ACTION == 'FULL_PIPELINE' } }
-                    steps { sh "docker build -t backend:${IMAGE_TAG} ./backend" }
-                }
-                stage('Scan Backend') {
-                    when { expression { params.ACTION == 'FULL_PIPELINE' } }
-                    steps {
-                        sh """
-                            trivy image backend:${IMAGE_TAG} \
-                                --severity CRITICAL,HIGH \
-                                --format json -o ${TRIVY_OUTPUT_JSON}
-                        """
-                        archiveArtifacts artifacts: "${TRIVY_OUTPUT_JSON}"
-                    }
-                }
-                stage('Push Backend') {
-                    when { expression { params.ACTION == 'FULL_PIPELINE' } }
-                    steps {
-                        script {
-                            def fullImg = "${HARBOR_URL}/${HARBOR_PROJECT}/backend:${IMAGE_TAG}"
-                            withCredentials([usernamePassword(credentialsId: 'harbor-creds', usernameVariable: 'U', passwordVariable: 'P')]) {
-                                sh "echo \$P | docker login ${HARBOR_URL} -u \$U --password-stdin"
-                                sh "docker tag backend:${IMAGE_TAG} ${fullImg}"
-                                sh "docker push ${fullImg}"
+        stage('Push Images to Harbor') {
+            when { expression { params.ACTION == 'FULL_PIPELINE' } }
+            steps {
+                script {
+                    def services = [
+                        FRONTEND: "frontend",
+                        BACKEND : "backend"
+                    ]
+
+                    services.each { key, img ->
+                        if (params.SERVICE == key || params.SERVICE == 'ALL') {
+
+                            def fullImage = "${HARBOR_URL}/${HARBOR_PROJECT}/${img}:${IMAGE_TAG}"
+
+                            withCredentials([usernamePassword(
+                                credentialsId: 'harbor-creds',
+                                usernameVariable: 'HARBOR_USER',
+                                passwordVariable: 'HARBOR_PASS'
+                            )]) {
+                                sh "echo \$HARBOR_PASS | docker login ${HARBOR_URL} -u \$HARBOR_USER --password-stdin"
+                                sh "docker tag ${img}:${IMAGE_TAG} ${fullImage}"
+                                sh "docker push ${fullImage}"
                             }
+
+                            // cleanup local image
+                            sh "docker rmi ${img}:${IMAGE_TAG} || true"
                         }
                     }
                 }
-                stage('Deploy Backend') {
-                    when { expression { params.ACTION == 'FULL_PIPELINE' } }
-                    steps {
-                        sh """
-                            sed -i 's/__IMAGE_TAG__/${IMAGE_TAG}/g' k8s/backend-deployment.yaml
-                            kubectl apply -f k8s/backend-deployment.yaml
-                        """
+            }
+        }
+
+        stage('Apply Kubernetes Deployment') {
+            when { expression { params.ACTION == 'FULL_PIPELINE' } }
+            steps {
+                script {
+
+                    if (params.SERVICE == 'FRONTEND' || params.SERVICE == 'ALL') {
+                        sh "sed -i 's/__IMAGE_TAG__/${IMAGE_TAG}/g' k8s/frontend-deployment.yaml"
+                        sh "kubectl apply -f k8s/frontend-deployment.yaml"
+                        sh "kubectl apply -f k8s/frontend-service.yaml"
                     }
-                }
-                stage('Scale Backend') {
-                    steps { sh "kubectl scale deployment backend --replicas=${params.BACKEND_REPLICAS}" }
+
+                    if (params.SERVICE == 'BACKEND' || params.SERVICE == 'ALL') {
+                        sh "sed -i 's/__IMAGE_TAG__/${IMAGE_TAG}/g' k8s/backend-deployment.yaml"
+                        sh "kubectl apply -f k8s/backend-deployment.yaml"
+                        sh "kubectl apply -f k8s/backend-service.yaml"
+                    }
+
+                    // database only applied when ALL selected
+                    if (params.SERVICE == 'ALL') {
+                        sh "kubectl apply -f k8s/database-statefulset.yaml"
+                        sh "kubectl apply -f k8s/database-service.yaml"
+                    }
                 }
             }
         }
 
+        stage('Scale Deployments') {
+            steps {
+                script {
+                    sh "kubectl scale deployment frontend --replicas=${params.REPLICA_COUNT} || true"
+                    sh "kubectl scale deployment backend --replicas=${params.REPLICA_COUNT} || true"
+                    sh "kubectl scale statefulset database --replicas=${params.DB_REPLICA_COUNT} || true"
+
+                    sh "kubectl get deployments"
+                }
+            }
+        }
     }
 }
-
