@@ -131,19 +131,16 @@ pipeline {
                     if (params.SERVICE == 'FRONTEND' || params.SERVICE == 'ALL') {
                         sh "sed -i 's/__IMAGE_TAG__/${IMAGE_TAG}/g' k8s/frontend-deployment.yaml"
                         sh "kubectl apply -f k8s/frontend-deployment.yaml"
-                        sh "kubectl apply -f k8s/frontend-service.yaml"
                     }
 
                     if (params.SERVICE == 'BACKEND' || params.SERVICE == 'ALL') {
                         sh "sed -i 's/__IMAGE_TAG__/${IMAGE_TAG}/g' k8s/backend-deployment.yaml"
                         sh "kubectl apply -f k8s/backend-deployment.yaml"
-                        sh "kubectl apply -f k8s/backend-service.yaml"
                     }
 
                     // database only applied when ALL selected
                     if (params.SERVICE == 'ALL') {
                         sh "kubectl apply -f k8s/database-statefulset.yaml"
-                        sh "kubectl apply -f k8s/database-service.yaml"
                     }
                 }
             }
