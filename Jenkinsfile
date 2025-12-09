@@ -4,7 +4,7 @@ pipeline {
     environment {
         IMAGE_TAG = "${env.BUILD_NUMBER}"
         HARBOR_URL = "10.131.103.92:8090"
-        HARBOR_PROJECT = "kp_3"
+        HARBOR_PROJECT = "kp_4"
         TRIVY_OUTPUT_JSON = "trivy-output.json"
     }
 
