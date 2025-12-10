@@ -163,7 +163,7 @@ pipeline {
     when { expression { params.ACTION == 'FULL_PIPELINE' } }
     steps {
         echo "Starting port forwarding safely..."
-          bash start-port-forward.sh
+          sh "bash ./start-port-forward.sh"
     }
 }
     
