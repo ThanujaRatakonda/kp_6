@@ -159,15 +159,14 @@ pipeline {
                 }
             }
         }
- stage('Start Port Forwarding') {
+       stage('Start Port Forwarding') {
     when { expression { params.ACTION == 'FULL_PIPELINE' } }
     steps {
         echo "Starting port forwarding safely..."
-        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
-            sh "bash ./start-port-forward.sh"
-        }
+        sh "bash ./start-port-forward.sh"
     }
 }
+
 
     
     }
