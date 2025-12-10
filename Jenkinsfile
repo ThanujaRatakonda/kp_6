@@ -159,27 +159,9 @@ pipeline {
                 }
             }
         }
-        stage('Port Forward Services') {
-    when {
-        expression { params.ACTION in ['FULL_PIPELINE', 'FRONTEND_ONLY', 'BACKEND_ONLY'] }
-    }
+  stage('Port Forward Services') {
     steps {
-        sh """
-            echo "Killing any existing port-forward processes..."
-            for port in 5000 4000 5433; do
-                pid=\$(lsof -t -i:\$port || true)
-                if [ ! -z "\$pid" ]; then
-                    kill -9 \$pid
-                fi
-            done
-            echo "Starting port-forwarding in background..."
-            bash -c '
-                kubectl port-forward svc/backend 5000:5000 --address 0.0.0.0 >/dev/null 2>&1 &
-                kubectl port-forward svc/frontend 4000:3000 --address 0.0.0.0 >/dev/null 2>&1 &
-                kubectl port-forward statefulset/database 5433:5432 --address 0.0.0.0 >/dev/null 2>&1 &
-                disown
-            '
-        """
+        sh "bash ~/start-port-forwards.sh"
     }
 }
 
