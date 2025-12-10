@@ -160,14 +160,12 @@ pipeline {
             }
         }
       //use port forward
-      //  stage('Start Port Forwarding') {
-   // when { expression { params.ACTION == 'FULL_PIPELINE' } }
-   // steps {
-     //   echo "Starting port forwarding safely..."
-     //   sh "bash start-port-forward.sh"
-  //  }
-//}
-
-     
+     stage('Start Port Forwarding') {
+       when { expression { params.ACTION == 'FULL_PIPELINE' } }
+         steps {
+             echo "Starting port forwarding safely..."
+             sh "bash start-port-forward.sh"
+         }
+       }     
     }
 }
