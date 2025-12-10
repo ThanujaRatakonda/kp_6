@@ -81,7 +81,6 @@ pipeline {
             steps {
                 sh "sed -i 's/__IMAGE_TAG__/${IMAGE_TAG}/g' k8s/frontend-deployment.yaml"
                 sh "kubectl apply -f k8s/frontend-deployment.yaml"
-                sh "kubectl apply -f k8s/backend-ingress.yaml"
             }
         }
 
@@ -132,6 +131,7 @@ pipeline {
             steps {
                 sh "sed -i 's/__IMAGE_TAG__/${IMAGE_TAG}/g' k8s/backend-deployment.yaml"
                 sh "kubectl apply -f k8s/backend-deployment.yaml"
+                sh "kubectl apply -f k8s/backend-ingress.yaml || true"
             }
         }
 
