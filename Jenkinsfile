@@ -159,11 +159,12 @@ pipeline {
                 }
             }
         }
-        stage('Deploy HPA') {
+                stage('Deploy HPA') {
             when { expression { params.ACTION in ['FULL_PIPELINE', 'SCALE_ONLY', 'FRONTEND_ONLY', 'BACKEND_ONLY'] } }
             steps {
                 echo "Applying Vertical Pod Autoscalers..."
                 sh "kubectl apply -f k8s/frontend-vpa.yaml || true"
+                sh "kubectl apply -f k8s/backend-vpa.yaml || true"
             }
         }
     }
